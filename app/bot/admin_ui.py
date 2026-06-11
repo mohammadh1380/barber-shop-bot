@@ -1,5 +1,7 @@
 from datetime import time
 from aiogram import Router, types
+
+BACK_BUTTON_TEXT = "🔙 بازگشت"
 from app.bot.admin_guard import admin_only
 from app.bot.state import ADMIN_STATE
 from app.core.database import SessionLocal
@@ -23,22 +25,48 @@ async def admin_panel(message: types.Message):
     await message.answer("پنل مدیریت:", reply_markup=keyboard)
 
 @router.callback_query(lambda c: c.data == "admin_services")
+@admin_only
 async def services_menu(callback: types.CallbackQuery):
     keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
         [types.InlineKeyboardButton(text="➕ افزودن سرویس", callback_data="add_service")],
         [types.InlineKeyboardButton(text="📋 لیست سرویس‌ها", callback_data="list_services")],
-        [types.InlineKeyboardButton(text="🔙 بازگشت", callback_data="admin_back")],
+        [types.InlineKeyboardButton(text=BACK_BUTTON_TEXT, callback_data="admin_back")],
     ])
 
     await callback.message.edit_text("مدیریت سرویس‌ها:", reply_markup=keyboard)
     await callback.answer()
 
+@router.callback_query(lambda c: c.data == "list_services")
+@admin_only
+async def list_services(callback: types.CallbackQuery):
+    db = SessionLocal()
+
+    try:
+        items = db.query(Service).order_by(Service.id).all()
+
+        if not items:
+            await callback.message.answer("سرویسی وجود ندارد ❌")
+            await callback.answer()
+            return
+
+        text = "لیست سرویس‌ها:\n\n"
+        for item in items:
+            text += f"• {item.id} - {item.title} ({item.duration_minutes} دقیقه)\n"
+
+        await callback.message.answer(text)
+    finally:
+        db.close()
+
+    await callback.answer()
+
+
 @router.callback_query(lambda c: c.data == "admin_workers")
+@admin_only
 async def workers_menu(callback: types.CallbackQuery):
     keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
         [types.InlineKeyboardButton(text="➕ افزودن آرایشگر", callback_data="add_worker")],
         [types.InlineKeyboardButton(text="📋 لیست آرایشگرها", callback_data="list_workers")],
-        [types.InlineKeyboardButton(text="🔙 بازگشت", callback_data="admin_back")],
+        [types.InlineKeyboardButton(text=BACK_BUTTON_TEXT, callback_data="admin_back")],
     ])
 
     await callback.message.edit_text("مدیریت آرایشگرها:", reply_markup=keyboard)
@@ -150,16 +178,18 @@ async def add_worker_start(callback: types.CallbackQuery):
     await callback.answer()
 
 @router.callback_query(lambda c: c.data == "admin_back")
+@admin_only
 async def back(callback: types.CallbackQuery):
     await admin_panel(callback.message)
     await callback.answer()
 
 @router.callback_query(lambda c: c.data == "admin_hours")
+@admin_only
 async def hours_menu(callback: types.CallbackQuery):
     keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
         [types.InlineKeyboardButton(text="➕ تنظیم ساعت کاری", callback_data="set_hours")],
         [types.InlineKeyboardButton(text="📋 مشاهده ساعت‌ها", callback_data="list_hours")],
-        [types.InlineKeyboardButton(text="🔙 بازگشت", callback_data="admin_back")],
+        [types.InlineKeyboardButton(text=BACK_BUTTON_TEXT, callback_data="admin_back")],
     ])
 
     await callback.message.edit_text("ساعات کاری:", reply_markup=keyboard)
@@ -173,68 +203,10 @@ async def set_hours_start(callback: types.CallbackQuery):
     await callback.message.answer("ID آرایشگر را وارد کنید:")
     await callback.answer()
 
-@router.message()
-async def admin_flow(message: types.Message):
-    user_id = message.from_user.id
-    state = ADMIN_STATE.get(user_id)
-
-    if not state:
-        return
-
-    db = SessionLocal()
-
-    try:
-        step = state.get("step")
-
-        # -------------------------
-        # WORKING HOURS FLOW
-        # -------------------------
-        if step == "wh_worker":
-            state["worker_id"] = int(message.text)
-            state["step"] = "wh_weekday"
-
-            await message.answer("روز هفته (0=دوشنبه ... 6=یکشنبه):")
-            return
-
-        if step == "wh_weekday":
-            state["weekday"] = int(message.text)
-            state["step"] = "wh_start"
-
-            await message.answer("ساعت شروع (HH:MM):")
-            return
-
-        if step == "wh_start":
-            state["start"] = message.text
-            state["step"] = "wh_end"
-
-            await message.answer("ساعت پایان (HH:MM):")
-            return
-
-        if step == "wh_end":
-            start_t = time.fromisoformat(state["start"])
-            end_t = time.fromisoformat(message.text)
-
-            wh = WorkingHours(
-                worker_id=state["worker_id"],
-                weekday=state["weekday"],
-                start_time=start_t,
-                end_time=end_t
-            )
-
-            db.add(wh)
-            db.commit()
-
-            ADMIN_STATE.pop(user_id, None)
-
-            await message.answer("ساعت کاری ثبت شد ✅")
-            return
-
-    finally:
-        db.close()
-
 from app.models.appointment import Appointment
 
 @router.callback_query(lambda c: c.data == "admin_appointments")
+@admin_only
 async def appointments_menu(callback: types.CallbackQuery):
     db = SessionLocal()
 
